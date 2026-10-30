@@ -4434,6 +4434,7 @@ function defaultState() {
     active: null,
   };
 }
+function standalone() { try { return matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch (e) { return false; } }
 function readLS(k) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : null; } catch (e) { return null; } }
 function writeLS(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
 function normalize(s) {
@@ -4932,6 +4933,19 @@ function Onboard() {
   </section>`;
 }
 
+// Fuera de Claude (app instalable) los datos empiezan vacíos: ofrecer traerlos con el respaldo
+function MigrateCard() {
+  if (window.claude && window.claude.use) return null;
+  if (S.workouts.length || S.bw.length || Object.keys(S.days).length) return null;
+  return html`<section class="card">
+    <div class="stack">
+      <span class="eyebrow">¿Ya usabas Oso Gym?</span>
+      <p class="small">Trae tus entrenos, comidas y peso: en la otra app ve a <b>Más → Respaldo → Copiar</b> y aquí dale <b>Pegar</b>.</p>
+    </div>
+    <button class="btn" onClick=${() => { goTab('mas'); ui({ more: 'respaldo' }); }}><${Icon} n="shield" />Traer mis datos</button>
+  </section>`;
+}
+
 function Countdown() {
   const left = daysBetween(today(), PLAN.goalDate);
   if (left < 0) return null;
@@ -5118,6 +5132,7 @@ function HoyView() {
   useStore();
   const t = targets();
   return html`
+    <${MigrateCard} />
     ${!t.ready ? html`<${Onboard} />` : null}
     <${NextCard} />
     <${AdjustCard} />
@@ -5870,7 +5885,7 @@ function PhotoButton({ id, label, icon, onFile, ghost }) {
 
 // Base pública de productos (solo funciona fuera del artifact; ahí el navegador bloquea la consulta)
 async function offLookup(code) {
-  if (!navigator.onLine) return null;
+  if (!navigator.onLine || (window.claude && window.claude.use)) return null;
   const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 7000);
   try {
     const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_es,generic_name,brands,serving_size,serving_quantity,nutriments`, { signal: ctl.signal });
@@ -6099,10 +6114,10 @@ function MoreView() {
       <div class="grow stack" style="gap:1px"><span style="font-weight:700">${t}</span><span class="small muted">${d}</span></div>
       <span class="chev"><${Icon} n="right" /></span>
     </button>`)}</div></section>
-    <section class="card">
+    ${standalone() ? null : html`<section class="card">
       <h3 class="h3">Instalar en tu cel</h3>
       <p class="small muted"><b>iPhone (Safari):</b> botón Compartir → "Agregar a inicio". <b>Android (Chrome):</b> menú ⋮ → "Agregar a la pantalla principal". Así la abres como app con un toque.</p>
-    </section>
+    </section>`}
     <p class="tiny muted" style="text-align:center">Oso Gym · plan v${PLAN.version} · hecho para Planet Fitness Arcadia</p>
   `;
 }
@@ -6232,6 +6247,10 @@ function Backup() {
       openSheet('confirm', { title: 'Importar respaldo', text: `Reemplaza todo lo que tienes ahora por el respaldo (${st.workouts.length} entrenos, ${(st.bw || []).length} pesadas).`, yes: 'Importar', danger: true, onYes: () => { S = normalize(st); update(() => { }, { now: true }); setTxt(''); toast('Respaldo importado'); } });
     } catch (e) { toast('Ese texto no es un respaldo válido'); }
   };
+  const paste = async () => {
+    try { const t = await navigator.clipboard.readText(); if (!t.trim()) throw 0; setTxt(t); doImport(t); }
+    catch (e) { toast('Mantén presionado el cuadro y elige Pegar'); const el = document.getElementById('bk-in'); if (el) el.focus(); }
+  };
   const file = e => { const f = e.target.files[0]; if (!f) return; const r = new FileReader(); r.onload = () => doImport(String(r.result)); r.readAsText(f); e.target.value = ''; };
   return html`
     <section class="card">
@@ -6245,7 +6264,9 @@ function Backup() {
     </section>
     <section class="card">
       <h3 class="h3">Importar</h3>
-      <textarea id="bk-in" class="inp" placeholder="Pega aquí el respaldo" value=${txt} onInput=${e => setTxt(e.target.value)}></textarea>
+      <p class="small muted">¿Vienes de otro equipo o de la versión en Claude? Allá ve a Más → Respaldo → Copiar, y aquí dale Pegar.</p>
+      <button class="btn block" onClick=${paste}><${Icon} n="copy" />Pegar respaldo copiado</button>
+      <textarea id="bk-in" class="inp" placeholder="O pega aquí el respaldo" value=${txt} onInput=${e => setTxt(e.target.value)}></textarea>
       <div class="grid2">
         <button class="btn ghost" disabled=${!txt.trim()} onClick=${() => doImport(txt)}>Importar texto</button>
         <label class="btn ghost" for="bk-file">Desde archivo<input id="bk-file" type="file" accept=".json,application/json,text/plain" hidden onChange=${file} /></label>
@@ -6306,7 +6327,7 @@ function App() {
     if (S.active) keepAwake(true);
   }, []);
   const titles = {
-    hoy: ['Hoy', `${DIAS_L[new Date().getDay()]} ${new Date().getDate()} de ${['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'][new Date().getMonth()]} · ¿Qué onda, ${s.settings.name}?`],
+    hoy: ['Hoy', `${DIAS_L[new Date().getDay()]} ${new Date().getDate()} de ${['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre'][new Date().getMonth()]} · ¿Qué onda${s.settings.name ? ', ' + s.settings.name : ''}?`],
     entrenar: [s.active ? 'Entrenando' : 'Entrenar', s.active ? s.active.dayName : 'Rutina Torso / Pierna'],
     progreso: ['Progreso', 'Fuerza, peso y constancia'],
     comida: ['Comida', 'Calorías y proteína'],
